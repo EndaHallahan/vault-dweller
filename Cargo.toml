@@ -1,0 +1,19 @@
+[package]
+name = "vault_dweller"
+version = "0.1.0"
+edition = "2021"
+exclude = [
+	"Test Vault",
+	"tests",
+	".github",
+]
+
+[dependencies]
+chrono = "0.4.38"
+fancy-regex = "0.14.0"
+indexmap = "2.6.0"
+regex = "1.11.1"
+yaml-rust = "0.4.5"
+
+[lib]
+name="vault_dweller"
