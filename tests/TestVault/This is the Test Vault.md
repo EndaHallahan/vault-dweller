@@ -1,3 +1,4 @@
+#test
 
 This is your new *vault*.
 
