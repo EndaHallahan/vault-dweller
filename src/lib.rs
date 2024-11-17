@@ -1,4 +1,4 @@
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 //! # Vault Dweller
 //!
 //! Vault Dweller makes it more convenient to work with 
@@ -10,7 +10,7 @@
 //! collection of files and folders in a vault. Files can be accessed
 //! by name or local path, the same way notes can be linked in Obsidian.
 //!
-//! Files are represented as [`FileItem`]s, and contain their own metadata
+//! Files are represented as [`NoteItem`]s, and contain their own metadata
 //! (front matter, tags). They can also fetch their own contents from the 
 //! disk.
 //!
@@ -22,9 +22,9 @@
 //!
 //! let mut p = env::current_dir().unwrap();
 //! p.push("tests\\TestVault");
-//! let vi = VaultIndex::new(p.to_str()).unwrap();
-//! let fc = vi.get_file("This is the Test Vault");
-//! assert_eq!(vec!["test".to_string()], fc.unwrap().tags);
+//! let vi = VaultIndex::new(p.to_str(), true).unwrap();
+//! let fc = vi.get_item("This is the Test Vault");
+//! assert_eq!(vec!["test".to_string()], fc.unwrap().unwrap_note().tags);
 //! ```
 
 use std::io;
@@ -51,9 +51,31 @@ pub enum Property {
 }
 
 #[derive(Debug)]
+pub enum VaultItem<'a> {
+    Note(&'a NoteItem),
+    File(&'a FileItem),
+}
+impl <'a> VaultItem<'a> {
+    pub fn unwrap_note(&self) -> &NoteItem {
+        return match self {
+            VaultItem::Note(n) => n,
+            _ => {panic!("Called unwrap_note on not a note!");}
+        }
+    }
+
+    pub fn unwrap_file(&self) -> &FileItem {
+        return match self {
+            VaultItem::File(n) => n,
+            _ => {panic!("Called unwrap_file on not a file!");}
+        }
+    }
+}
+
+#[derive(Debug)]
 enum FileFolder {
     File(FileItem),
     Folder(FolderItem),
+    Note(NoteItem),
 }
 
 /// Represents a folder in the Vault.
@@ -61,7 +83,7 @@ enum FileFolder {
 /// Note that folders cannot get their children, and that this struct
 /// exists more as a way of referencing that a folder is there than
 /// as a way of interacting with the vault. If you need to do that,
-/// you may want to work with the `local_path` field on [`FileItem`] 
+/// you may want to work with the `local_path` field on [`NoteItem`] 
 /// instead.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FolderItem {
@@ -70,12 +92,20 @@ pub struct FolderItem {
     pub local_path: PathBuf,
 }
 
-/// Represents a file in the Vault.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileItem {
+    pub name: String,
+    pub file_type: String,
+    pub path: PathBuf,
+    pub local_path: PathBuf,
+}
 
+/// Represents a note in the Vault.
+///
 /// The `properties` field represents the properties defined in a note's
 /// front matter, as a HashMap of [`Property`] enums.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FileItem {
+pub struct NoteItem {
     pub name: String,
     pub file_type: String,
     pub path: PathBuf,
@@ -83,15 +113,15 @@ pub struct FileItem {
     pub properties: HashMap<String, Property>,
     pub tags: Vec<String>,
 }
-impl FileItem {
+impl NoteItem {
     /// Returns a representation of this struct as a json string.
     pub fn as_json(&self) -> String {
-        serde_json::to_string(self).expect(&format!("Couldn't parse FileItem {:?} into JSON!", self.name))
+        serde_json::to_string(self).expect(&format!("Couldn't parse NoteItem {:?} into JSON!", self.name))
     }
     /// Returns a representation of this struct's `properties` 
     /// field as a json string.
     pub fn properties_as_json(&self) -> String {
-        serde_json::to_string(&self.properties).expect(&format!("Couldn't parse FileItem {:?} properties into JSON!", self.name))
+        serde_json::to_string(&self.properties).expect(&format!("Couldn't parse NoteItem {:?} properties into JSON!", self.name))
     }
     /// Retrieves the contents of the note from the disk.
     pub fn get_contents(&self) -> Result<String, io::Error> {
@@ -103,6 +133,7 @@ impl FileItem {
 #[derive(Debug)]
 pub struct VaultIndex {
     pub path: Option<PathBuf>,
+    pub notes: IndexMap<String, NoteItem>,
     pub files: IndexMap<String, FileItem>,
     pub folders: Vec<FolderItem>,
     pub filepath_ref: IndexMap<String, String>,
@@ -114,8 +145,9 @@ impl VaultIndex {
     /// Creates a new [`VaultIndex`], given the path to a vault as a string.
     /// The path is wrapped in an `Option`, and you may supply `None` if you
     /// do not want to generate a [`VaultIndex`] from an existing vault.
-    pub fn new(path_to_vault: Option<&str>) -> Result<Self, io::Error> {
+    pub fn new(path_to_vault: Option<&str>, include_obsidian_folder: bool) -> Result<Self, io::Error> {
         let mut path: PathBuf = PathBuf::new();
+        let mut notes: IndexMap<String, NoteItem> = IndexMap::new();
         let mut files: IndexMap<String, FileItem> = IndexMap::new();
         let mut folders: Vec<FolderItem> = vec![];
         let mut filepath_ref: IndexMap<String, String> = IndexMap::new();
@@ -128,24 +160,32 @@ impl VaultIndex {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "The path specified either could not be found, could not be accessed, or was not a directory."));
             }
 
-            let file_collection = Self::recursive_generate_filefolders(&p, &p);
+            let file_collection = Self::recursive_generate_filefolders(&p, &p, include_obsidian_folder);
             
             for file in file_collection {
                 match file {
-                    FileFolder::File(fi) => {
+                    FileFolder::Note(fi) => {
                         filepath_ref.insert(fi.local_path.to_str().unwrap().to_string().clone(), fi.name.clone());
                         tags.append(&mut fi.tags.clone());
                         for key in fi.properties.keys() {
                             properties.push(key.clone());
                         }
-                        files.insert(fi.name.clone(), fi);
-                        
+                        notes.insert(fi.name.clone(), fi);
+                    }
+                    FileFolder::File(fi) => {
+                        filepath_ref.insert(fi.local_path.to_str().unwrap().to_string().clone(), fi.name.clone());
+                        files.insert(fi.name.clone(), fi); 
                     },
                     FileFolder::Folder(fi) => {
                         folders.push(fi);
                     },
                 }
             }
+            
+            /*
+            println!("\n==== NOTES ====");
+            println!("{:?}", notes);
+            */
             /*
             println!("\n==== FILES ====");
             println!("{:?}", files);
@@ -174,6 +214,7 @@ impl VaultIndex {
 
         let vi = VaultIndex {
             path: Some(path),
+            notes,
             files,
             folders,
             filepath_ref,
@@ -184,18 +225,23 @@ impl VaultIndex {
         Ok(vi)
     }
 
-    /// Retrieves a [`FileItem`] from the [`VaultIndex`] by name or local
+    /// Retrieves a [`NoteItem`] from the [`VaultIndex`] by name or local
     /// path. Returns `None` if there was no file matching that name/path
     /// in the index.
     ///
     /// ```rust
-    /// let vi = VaultIndex::new(p.to_str()).expect("Couldn't make Vault Index!");
+    /// use vault_dweller::VaultIndex;
+    /// use std::env;
+    ///
+    /// let mut p = env::current_dir().unwrap();
+    /// p.push("tests\\TestVault");
+    /// let vi = VaultIndex::new(p.to_str(), true).expect("Couldn't make Vault Index!");
     /// /* Name */
-    /// let fa = vi.get_file("This is the Test Vault");
+    /// let fa = vi.get_item("This is the Test Vault");
     /// /* Local Path */
-    /// let fb = vi.get_file("Folder A/Lorem Ipsum");
+    /// let fb = vi.get_item("Folder A/Lorem Ipsum");
     /// ```
-    pub fn get_file(&self, local_path: &str) -> Option<&FileItem> {
+    pub fn get_item(&self, local_path: &str) -> Option<VaultItem> {
         let mut adj_local_path: &str = &local_path.replace("/", "\\");
         match adj_local_path.find("\\") {
             Some(_) =>  {
@@ -209,28 +255,42 @@ impl VaultIndex {
                 adj_local_path = local_path;
             },
         };
-
-        self.files.get(adj_local_path)
+        if let Some(note) = self.notes.get(adj_local_path) {
+            return Some(VaultItem::Note(note));
+        } else if let Some(file) = self.files.get(adj_local_path) {
+            return Some(VaultItem::File(file));
+        } else {
+            return None;
+        }
     }
-    /// Retrieves a file's contents by name or local path as a String. This is a 
-    /// convenience method for `.get_file("/path").unwrap().get_contents()`. 
+    /// Retrieves a note's contents by name or local path as a String. 
     /// It will return an Error if the file cannot be found or cannot be opened.
+    ///
     /// ```rust
-    /// let vi = VaultIndex::new(p.to_str()).expect("Couldn't make Vault Index!");
+    /// use vault_dweller::VaultIndex;
+    /// use std::env;
+    ///
+    /// let mut p = env::current_dir().unwrap();
+    /// p.push("tests\\TestVault");
+    /// let vi = VaultIndex::new(p.to_str(), true).expect("Couldn't make Vault Index!");
     /// /* Name */
-    /// let fa = vi.get_file_contents("This is the Test Vault");
+    /// let fa = vi.get_note_contents("This is the Test Vault");
     /// /* Local Path */
-    /// let fb = vi.get_file_contents("Folder A/Lorem Ipsum");
+    /// let fb = vi.get_note_contents("Folder A/Lorem Ipsum");
     /// ```
-    pub fn get_file_contents(&self, local_path: &str) -> Result<String, io::Error> {
-        if let Some(entry) = self.get_file(local_path) {
-            return entry.get_contents();
+    pub fn get_note_contents(&self, local_path: &str) -> Result<String, io::Error> {
+        if let Some(entry) = self.get_item(local_path) {
+            return match entry {
+                VaultItem::Note(n) => n.get_contents(),
+                _ => Err(io::Error::new(io::ErrorKind::Other, "Couldn't match local path!")),
+            }
+            
         } else {
             return Err(io::Error::new(io::ErrorKind::Other, "Couldn't match local path!"));
         }  
     }
 
-    fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf) -> Vec<FileFolder> {
+    fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf, include_obsidian_folder: bool,) -> Vec<FileFolder> {
         let mut out_filefolders: Vec<FileFolder> = vec![];
         let fpath = fs::read_dir(dir_path);
         match fpath {
@@ -238,9 +298,14 @@ impl VaultIndex {
                 for path in paths {
                     let child_file = path.unwrap();
                     if child_file.file_type().unwrap().is_dir() {
+                        if !include_obsidian_folder && &child_file.path().file_name().unwrap().to_str().unwrap() == &".obsidian" {
+                            continue;
+                        }
                         out_filefolders.push(Self::generate_folder_item(&child_file.path(), vault_path).unwrap());
-                        let mut children_filepaths = Self::recursive_generate_filefolders(&child_file.path(), vault_path);
+                        let mut children_filepaths = Self::recursive_generate_filefolders(&child_file.path(), vault_path, include_obsidian_folder);
                         out_filefolders.append(&mut children_filepaths);
+                    } else if child_file.path().extension().unwrap() == "md" {
+                        out_filefolders.push(Self::generate_note_item(&child_file.path(), vault_path).unwrap());
                     } else {
                         out_filefolders.push(Self::generate_file_item(&child_file.path(), vault_path).unwrap());
                     }
@@ -266,6 +331,19 @@ impl VaultIndex {
     }
 
     fn generate_file_item(path: &PathBuf, vault_path: &PathBuf) -> Result<FileFolder, io::Error> {
+        let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+        let file_type = path.extension().unwrap().to_str().unwrap().to_owned();
+        let local_path = path.strip_prefix(vault_path).unwrap().to_path_buf();
+        let fi = FileItem {
+            name,
+            file_type,
+            path: path.to_path_buf(),
+            local_path,
+        };
+        Ok(FileFolder::File(fi))
+    }
+
+    fn generate_note_item(path: &PathBuf, vault_path: &PathBuf) -> Result<FileFolder, io::Error> {
         let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let file_type = path.extension().unwrap().to_str().unwrap().to_owned();
         let mut local_path = path.strip_prefix(vault_path).unwrap().to_path_buf();
@@ -298,7 +376,7 @@ impl VaultIndex {
             }
         }
 
-        let fi = FileItem {
+        let fi = NoteItem {
             name,
             file_type,
             path: path.to_path_buf(),
@@ -306,7 +384,7 @@ impl VaultIndex {
             properties,
             tags,
        };
-       Ok(FileFolder::File(fi))
+       Ok(FileFolder::Note(fi))
     }
 
     fn generate_properties(property_yaml: &str) -> Result<HashMap<String, Property>, io::Error> {
