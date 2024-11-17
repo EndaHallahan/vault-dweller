@@ -263,6 +263,25 @@ impl VaultIndex {
             return None;
         }
     }
+
+    pub fn get_note(&self, local_path: &str) -> Option<&NoteItem> {
+        let mut adj_local_path: &str = &local_path.replace("/", "\\");
+        match adj_local_path.find("\\") {
+            Some(_) =>  {
+                if let Some(p) = self.filepath_ref.get(adj_local_path) {
+                    adj_local_path = &p;
+                } else {
+                    return None;
+                }
+            },
+            None => {
+                adj_local_path = local_path;
+            },
+        };
+
+        self.notes.get(adj_local_path)
+    }
+
     /// Retrieves a note's contents by name or local path as a String. 
     /// It will return an Error if the file cannot be found or cannot be opened.
     ///
