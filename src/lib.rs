@@ -71,6 +71,98 @@ impl <'a> VaultItem<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ItemType {
+    File,
+    Folder,
+    Note,
+    Root
+}
+
+#[derive(Debug)]
+pub struct TreeNode {
+    pub name: String,
+    pub index: usize,
+    pub item: ItemType,
+    pub children: Vec<usize>,
+    pub depth: u32,
+}
+impl TreeNode {
+    fn new(index: usize, item: ItemType, name: String, depth: u32) -> Self {
+        Self {
+            name,
+            index,
+            item,
+            children: vec![],
+            depth
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Tree {
+    arena: Vec<TreeNode>,
+}
+impl Tree {
+    pub fn new() -> Self {
+        let mut new_tree = Self {
+            arena: vec![],
+        };
+        new_tree.add_node("root".to_string(), ItemType::Root, 0);
+        new_tree
+    }
+    pub fn get_root(&self) -> &TreeNode {
+        &self.arena[0]
+    }
+
+    pub fn get_node(&self, index: usize) -> Option<&TreeNode> {
+        self.arena.get(index)
+    }
+
+    pub fn get_node_mut(&mut self, index: usize) -> Option<&mut TreeNode> {
+        self.arena.get_mut(index)
+    }
+
+    pub fn has_node(&self, index: usize) -> bool {
+         self.arena.len() > index
+    }
+
+    pub fn add_child(&mut self, parent: usize, name: String, item: ItemType) -> Option<usize> {
+        if !self.has_node(parent) {
+            return None;
+        }
+        let idx = self.add_node(name, item, 0);
+        let mut depth: u32 = 0;
+        if let Some(parent_node) = self.get_node_mut(parent) {
+            parent_node.children.push(idx);
+            depth = parent_node.depth
+        } else {
+            return None;
+        }  
+        self.arena[idx].depth = depth + 1;
+        return Some(idx);
+    }
+
+    pub fn as_flat_vec(&self, node_index: usize) -> Vec<&TreeNode> {
+        let mut nodes: Vec<&TreeNode> = vec![];
+        let node = self.get_node(node_index).expect("Couldn't find node of that index!");
+        let mut children: Vec<&TreeNode> = vec![];
+        for child in &node.children {
+            let mut child_children: Vec<&TreeNode>  = self.as_flat_vec(*child);
+            children.append(&mut child_children);
+        }
+        nodes.push(node);
+        nodes.append(&mut children);
+        nodes
+    }
+
+    fn add_node(&mut self, name: String, item: ItemType, depth: u32) -> usize {
+        let idx = self.arena.len();
+        self.arena.push(TreeNode::new(idx, item, name, depth));
+        idx
+    }
+}
+
 #[derive(Debug)]
 enum FileFolder {
     File(FileItem),
@@ -132,6 +224,7 @@ impl NoteItem {
 /// Represents everything in a vault.
 #[derive(Debug)]
 pub struct VaultIndex {
+    pub name: String,
     pub path: Option<PathBuf>,
     pub notes: IndexMap<String, NoteItem>,
     pub files: IndexMap<String, FileItem>,
@@ -139,6 +232,7 @@ pub struct VaultIndex {
     pub filepath_ref: IndexMap<String, String>,
     pub tags: Vec<String>,
     pub properties: Vec<String>,
+    pub tree: Tree,
 }
 
 impl VaultIndex {
@@ -146,6 +240,7 @@ impl VaultIndex {
     /// The path is wrapped in an `Option`, and you may supply `None` if you
     /// do not want to generate a [`VaultIndex`] from an existing vault.
     pub fn new(path_to_vault: Option<&str>, include_obsidian_folder: bool) -> Result<Self, io::Error> {
+        let mut name: String = Default::default();
         let mut path: PathBuf = PathBuf::new();
         let mut notes: IndexMap<String, NoteItem> = IndexMap::new();
         let mut files: IndexMap<String, FileItem> = IndexMap::new();
@@ -153,14 +248,17 @@ impl VaultIndex {
         let mut filepath_ref: IndexMap<String, String> = IndexMap::new();
         let mut tags: Vec<String> = vec![];
         let mut properties: Vec<String> = vec![];
+        let mut tree: Tree = Tree::new();
         if let Some(vault_path) = path_to_vault {
             let p = PathBuf::from(vault_path);
+            name = p.file_name().unwrap().to_str().unwrap().to_owned();
+            tree.arena[0].name = name.clone();
             path = p.clone();
             if !p.is_dir() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "The path specified either could not be found, could not be accessed, or was not a directory."));
             }
 
-            let file_collection = Self::recursive_generate_filefolders(&p, &p, include_obsidian_folder);
+            let file_collection = Self::recursive_generate_filefolders(&p, &p, include_obsidian_folder, &mut tree, 0);
             
             for file in file_collection {
                 match file {
@@ -182,6 +280,10 @@ impl VaultIndex {
                 }
             }
             
+            /*
+            println!("\n==== NAME ====");
+            println!("{:?}", name);
+            */
             /*
             println!("\n==== NOTES ====");
             println!("{:?}", notes);
@@ -206,13 +308,17 @@ impl VaultIndex {
             println!("\n==== PROPERTIES ====");
             println!("{:?}", properties);
             */
-            
+            /*
+            println!("\n==== TREE ====");
+            println!("{:?}", tree);
+            */
         }
 
         tags.dedup();
         properties.dedup();
 
         let vi = VaultIndex {
+            name,
             path: Some(path),
             notes,
             files,
@@ -220,6 +326,7 @@ impl VaultIndex {
             filepath_ref,
             tags,
             properties,
+            tree,
         };
 
         Ok(vi)
@@ -309,7 +416,7 @@ impl VaultIndex {
         }  
     }
 
-    fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf, include_obsidian_folder: bool,) -> Vec<FileFolder> {
+    fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf, include_obsidian_folder: bool, tree: &mut Tree, tree_parent: usize) -> Vec<FileFolder> {
         let mut out_filefolders: Vec<FileFolder> = vec![];
         let fpath = fs::read_dir(dir_path);
         match fpath {
@@ -321,11 +428,14 @@ impl VaultIndex {
                             continue;
                         }
                         out_filefolders.push(Self::generate_folder_item(&child_file.path(), vault_path).unwrap());
-                        let mut children_filepaths = Self::recursive_generate_filefolders(&child_file.path(), vault_path, include_obsidian_folder);
+                        let idx = tree.add_child(tree_parent, child_file.path().file_name().unwrap().to_str().unwrap().to_owned(), ItemType::Folder).expect("Couldn't find parent in tree!");
+                        let mut children_filepaths = Self::recursive_generate_filefolders(&child_file.path(), vault_path, include_obsidian_folder, tree, idx);
                         out_filefolders.append(&mut children_filepaths);
                     } else if child_file.path().extension().unwrap() == "md" {
+                        tree.add_child(tree_parent, child_file.path().file_stem().unwrap().to_str().unwrap().to_owned(), ItemType::Note);
                         out_filefolders.push(Self::generate_note_item(&child_file.path(), vault_path).unwrap());
                     } else {
+                        tree.add_child(tree_parent, child_file.path().file_name().unwrap().to_str().unwrap().to_owned(), ItemType::File);
                         out_filefolders.push(Self::generate_file_item(&child_file.path(), vault_path).unwrap());
                     }
                 }
