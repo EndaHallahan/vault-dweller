@@ -9,5 +9,5 @@ When you're ready, delete this note and make the vault your own.
 ![[Pasted image 20241116232620.jpg]]
 
 ```dataview
-LIST FROM #Lorem/Ipsum and #test 
+LIST FROM #Lorem AND (#Ipsum OR #test)
 ```

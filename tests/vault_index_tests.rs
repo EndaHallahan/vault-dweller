@@ -116,5 +116,5 @@ fn vault_index_can_get_item_properties_as_json() {
 fn vault_index_can_dataview() {
 	let p = get_vault_path();
 	let vi = VaultIndex::new(p.to_str(), true).expect("Couldn't make Vault Index!");
-	vi.query("LIST FROM #Lorem")
+	vi.query("LIST FROM #Lorem AND (#Ipsum OR #test)");
 }

@@ -13,7 +13,7 @@ enum DataSource {
     OutLink(String),
 }
 impl DataSource {
-    pub fn get_matches<'a>(&self, index: &'a VaultIndex) -> Option<Vec<String>> {
+    pub fn get_matches(&self, index: &VaultIndex) -> Option<Vec<String>> {
         if let Some(v) = match self {
             DataSource::Tag(tag_name) => index.tags.get(tag_name),
             _ => todo!("Other sources aren't implemented yet!"),
@@ -25,13 +25,13 @@ impl DataSource {
     }
 }
 
-fn eval_or(x: Option<Vec<String>>, y: Option<Vec<String>>) -> Option<Vec<String>> {
+fn eval_or(x: Option<Vec<String>>, y: Option<Vec<String>>) -> Option<Vec<String>> {  
     let mut out_vec: Vec<String> = vec![];
     if let Some(x_list) = x {
-        out_vec.extend(x_list.clone());
+        out_vec.extend(x_list);
     }
     if let Some(y_list) = y {
-        out_vec.extend(y_list.clone());
+        out_vec.extend(y_list);
     }
 
     out_vec.sort();
@@ -51,7 +51,7 @@ fn eval_and(x: Option<Vec<String>>, y: Option<Vec<String>>) -> Option<Vec<String
         if let Some(y_list) = y {
             for item in x_list {
                 if y_list.contains(&item) {
-                    out_vec.push(item.clone());
+                    out_vec.push(item);
                 }
             }
         }
@@ -76,39 +76,46 @@ enum Expr {
     },
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
+    Negate(Box<Expr>),
 }
 
 fn parser() -> impl Parser<char, Expr, Error = Simple<char>> {
-
-	
-
     let expr = recursive(|expr| {
-        let tag_path = filter(|c: &char| !c.is_ascii_whitespace()).repeated();
+        let tag_path = filter(|c: &char| (c.is_alphanumeric() || c == &'/')).repeated();
 
         let tag = just('#')
             .ignore_then(tag_path)
             .map(|c: Vec<char>| Expr::Source(DataSource::Tag(c.into_iter().collect())))
             .padded();
 
-        let op = tag.clone()
+        let negate = just('!')
+            .ignore_then(tag)
+            .map(|tag| Expr::Negate(Box::new(tag)));
+
+        let paren = expr.delimited_by(just('('), just(')'));
+
+        let atom = tag
+            .or(paren)
+            .padded();
+
+        let ope = atom.clone()
+            
             .then(
-                text::keyword("and").to(Expr::And as fn(_, _) -> _)
+                text::keyword("AND").to(Expr::And as fn(_, _) -> _)
+                .or(text::keyword("and").to(Expr::And as fn(_, _) -> _))
+                .or(text::keyword("OR").to(Expr::Or as fn(_, _) -> _))
                 .or(text::keyword("or").to(Expr::Or as fn(_, _) -> _))
-                .then(tag)
+                .then(atom)
                 .repeated()
             ).foldl(|lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)));
 
-
-        
-
-        op
+        ope
     });
 
     let from = text::keyword("FROM")
             .ignore_then(expr)
             .map(|tag| Expr::From(Box::new(tag)))
             .padded();
-
 
     let decl = recursive(|decl| {
         let r#list = text::keyword("LIST")
@@ -138,12 +145,12 @@ fn eval<'a>(expr: &'a Expr, index: &'a VaultIndex) -> Result<Option<Vec<String>>
 }
 
 pub fn to_view(in_query: &str, index: &VaultIndex ) {
-	match parser().parse(in_query) {
-        Ok(ast) => match eval(&ast, &index) {
+	match parser().parse_recovery_verbose(in_query) {
+        (Some(ast), _err_vec) => match eval(&ast, &index) {
             Ok(output) => println!("Matched Notes: {:?}", output),
             Err(eval_err) => println!("Evaluation error: {}", eval_err),
         },
-        Err(parse_errs) => parse_errs
+        (None, err_vec) => err_vec
             .into_iter()
             .for_each(|e| println!("Parse error: {}", e)),
     }
