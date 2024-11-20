@@ -110,6 +110,11 @@ fn vault_index_can_get_item_properties_as_json() {
 		},
 		_ => {panic!("Item wasn't a note!");}
 	}
+}
 
-
+#[test]
+fn vault_index_can_dataview() {
+	let p = get_vault_path();
+	let vi = VaultIndex::new(p.to_str(), true).expect("Couldn't make Vault Index!");
+	vi.query("LIST FROM #Lorem")
 }

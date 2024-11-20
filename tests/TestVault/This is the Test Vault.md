@@ -1,5 +1,5 @@
 #test
-
+` #we`
 This is your new *vault*.
 
 Make a note of something, [[create a link]], or try [the Importer](https://help.obsidian.md/Plugins/Importer)!
@@ -7,3 +7,7 @@ Make a note of something, [[create a link]], or try [the Importer](https://help.
 When you're ready, delete this note and make the vault your own.
 
 ![[Pasted image 20241116232620.jpg]]
+
+```dataview
+LIST FROM #Lorem/Ipsum and #test 
+```

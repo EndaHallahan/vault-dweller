@@ -15,7 +15,9 @@ exclude = [
 ]
 
 [dependencies]
+ariadne = "0.5.0"
 chrono = { version = "0.4.38", features = ["serde"] }
+chumsky = "0.9.3"
 fancy-regex = "0.14.0"
 indexmap = "2.6.0"
 regex = "1.11.1"

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "This is the Test Vault.md",
+                "file": "Folder A/Vivamus Pharetra.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "This is the Test Vault"
+              "title": "Vivamus Pharetra"
             }
           }
         ]
@@ -164,10 +164,10 @@
   },
   "active": "ec28c9ba9ee633b9",
   "lastOpenFiles": [
-    "Pasted image 20241116232620.jpg",
-    "This is the Test Vault.md",
-    "Folder A/Vivamus Pharetra.md",
     "Folder A/Lorem Ipsum.md",
+    "Folder A/Vivamus Pharetra.md",
+    "This is the Test Vault.md",
+    "Pasted image 20241116232620.jpg",
     "Folder A",
     "create a link.md"
   ]

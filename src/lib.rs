@@ -37,6 +37,8 @@ use regex::Regex;
 use yaml_rust::{ YamlLoader, Yaml };
 use serde::{ Deserialize, Serialize };
 
+mod dataview;
+
 /// Represents a property in a note's front matter.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -230,7 +232,7 @@ pub struct VaultIndex {
     pub files: IndexMap<String, FileItem>,
     pub folders: Vec<FolderItem>,
     pub filepath_ref: IndexMap<String, String>,
-    pub tags: Vec<String>,
+    pub tags: IndexMap<String, Vec<String>>,
     pub properties: Vec<String>,
     pub tree: Tree,
 }
@@ -246,7 +248,7 @@ impl VaultIndex {
         let mut files: IndexMap<String, FileItem> = IndexMap::new();
         let mut folders: Vec<FolderItem> = vec![];
         let mut filepath_ref: IndexMap<String, String> = IndexMap::new();
-        let mut tags: Vec<String> = vec![];
+        let mut tags: IndexMap<String, Vec<String>> = Default::default();
         let mut properties: Vec<String> = vec![];
         let mut tree: Tree = Tree::new();
         if let Some(vault_path) = path_to_vault {
@@ -264,7 +266,13 @@ impl VaultIndex {
                 match file {
                     FileFolder::Note(fi) => {
                         filepath_ref.insert(fi.local_path.to_str().unwrap().to_string().clone(), fi.name.clone());
-                        tags.append(&mut fi.tags.clone());
+                        for tag in &fi.tags {
+                            if let Some(tag_list) = tags.get_mut(tag) {
+                                tag_list.push(fi.name.clone());
+                            } else {
+                                tags.insert(tag.clone(), vec![fi.name.clone()]);
+                            }
+                        }
                         for key in fi.properties.keys() {
                             properties.push(key.clone());
                         }
@@ -314,7 +322,6 @@ impl VaultIndex {
             */
         }
 
-        tags.dedup();
         properties.dedup();
 
         let vi = VaultIndex {
@@ -416,6 +423,10 @@ impl VaultIndex {
         }  
     }
 
+    pub fn query(&self, in_query: &str) {
+        dataview::to_view(in_query, &self)
+    }
+
     fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf, include_obsidian_folder: bool, tree: &mut Tree, tree_parent: usize) -> Vec<FileFolder> {
         let mut out_filefolders: Vec<FileFolder> = vec![];
         let fpath = fs::read_dir(dir_path);
@@ -472,14 +483,35 @@ impl VaultIndex {
         Ok(FileFolder::File(fi))
     }
 
+    fn tag_splitter(tag: String) -> Vec<String> {
+        let mut out_tags: Vec<String> = vec![];
+        let tag_slices: Vec<&str> = tag.split('/').collect();
+        
+        for i in 0..tag_slices.len() {
+            let mut tag_string: String = Default::default();
+            for j in 0..i+1 {
+                if j != 0 {
+                    tag_string.push_str("/");
+                }
+                tag_string.push_str(tag_slices[j]);
+            }
+            out_tags.push(tag_string);
+        }
+
+        out_tags
+    }
+
     fn generate_note_item(path: &PathBuf, vault_path: &PathBuf) -> Result<FileFolder, io::Error> {
         let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
         let file_type = path.extension().unwrap().to_str().unwrap().to_owned();
         let mut local_path = path.strip_prefix(vault_path).unwrap().to_path_buf();
         local_path.set_extension("");
+
         // Figure out a way to remove these from the loop
         let tag_matcher = Regex::new(r"(\B#\S+)").expect("REGEX FAILED");
         let properties_matcher = Regex::new(r"(---[\w\W]*?---)").expect("REGEX FAILED");
+        let codeblock_matcher = Regex::new(r"```[\w\W]*```").expect("REGEX FAILED");
+        let inline_codeblock_matcher = Regex::new(r"[^\n\r`]+?`").expect("REGEX FAILED");
 
         let mut tags: Vec<String> = vec![];
         let mut properties: HashMap<String, Property> = Default::default();
@@ -488,13 +520,19 @@ impl VaultIndex {
 
         match file_contents {
             Ok(cont) => {
-                for (_, [tag]) in tag_matcher.captures_iter(&cont).map(|c| c.extract()) {
-                    tags.push(tag.to_string().replace('#', ""));
+                let mut adj_cont = codeblock_matcher.replace_all(&cont, "").to_string();
+                adj_cont = inline_codeblock_matcher.replace_all(&adj_cont, "").to_string();
+                //println!("{:?}", &cont);
+                for (_, [tag]) in tag_matcher.captures_iter(&adj_cont).map(|c| c.extract()) {
+                    let mut split_tags = Self::tag_splitter(tag.replace('#', ""));
+                    tags.append(&mut split_tags);
                 }
+                tags.sort();
+                tags.dedup();
 
-                if let Some(ind) = cont.find("---") {
+                if let Some(ind) = adj_cont.find("---") {
                     if ind == 0 {
-                        let properties_match = properties_matcher.captures(&cont).unwrap();
+                        let properties_match = properties_matcher.captures(&adj_cont).unwrap();
                         properties = Self::generate_properties(properties_match.get(0).unwrap().as_str().replace("---", "").trim()).unwrap();
 
                     }
