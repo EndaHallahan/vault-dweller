@@ -26,6 +26,7 @@
 //! let fc = vi.get_item("This is the Test Vault");
 //! assert_eq!(vec!["test".to_string()], fc.unwrap().unwrap_note().tags);
 //! ```
+mod dataview;
 
 use std::io;
 use std::fs::{ self };
@@ -37,7 +38,8 @@ use regex::Regex;
 use yaml_rust::{ YamlLoader, Yaml };
 use serde::{ Deserialize, Serialize };
 
-mod dataview;
+pub use dataview::{QueryOutput, ListItem, Table};
+
 
 /// Represents a property in a note's front matter.
 #[derive(Debug, Serialize, Deserialize)]
@@ -423,8 +425,10 @@ impl VaultIndex {
         }  
     }
 
-    pub fn query(&self, in_query: &str) {
-        dataview::to_view(in_query, &self)
+    pub fn query(&self, in_query: &str) -> QueryOutput {
+        let query_out = dataview::to_view(in_query, &self);
+        //println!("{:?}", query_out);
+        query_out
     }
 
     fn recursive_generate_filefolders(dir_path: &PathBuf, vault_path: &PathBuf, include_obsidian_folder: bool, tree: &mut Tree, tree_parent: usize) -> Vec<FileFolder> {
