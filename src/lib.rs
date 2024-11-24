@@ -512,7 +512,7 @@ impl VaultIndex {
         local_path.set_extension("");
 
         // Figure out a way to remove these from the loop
-        let tag_matcher = Regex::new(r"(\B#\S+)").expect("REGEX FAILED");
+        let tag_matcher = Regex::new(r"(\B#[^\s#]+)").expect("REGEX FAILED");
         let properties_matcher = Regex::new(r"(---[\w\W]*?---)").expect("REGEX FAILED");
         let codeblock_matcher = Regex::new(r"```[\w\W]*```").expect("REGEX FAILED");
         let inline_codeblock_matcher = Regex::new(r"[^\n\r`]+?`").expect("REGEX FAILED");
